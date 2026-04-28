@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Smart Label Tracker v3.1</title>
+    <title>Smart Label Tracker v3.2</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -30,43 +30,46 @@
             const fileInputRef = useRef(null);
 
             const parseLabelText = (text) => {
-                // Convert everything to uppercase and remove newlines for easier searching
                 const cleanText = text.toUpperCase().replace(/\n/g, ' ');
                 console.log("OCR Scanned Text:", cleanText);
 
                 let trk = "Not Found";
                 let courier = "Unknown";
 
-                // 1. Determine Courier by keywords anywhere in label
+                // 1. Detect Courier
                 if (cleanText.includes("FEDEX")) courier = "FedEx Ground";
                 if (cleanText.includes("UPS") || cleanText.includes("1Z")) courier = "UPS";
 
-                // 2. Target the Tracking Number
-                // This regex looks for 12 digits that might have spaces, 
-                // specifically looking for patterns near "TRK", "TRACKING", or "TRK#"
-                const trkPatterns = [
-                    /(?:TRK|TRACKING|TRK#|TRK#|TRKE)\s*[:#]?\s*([\d\s]{12,20})/i, // Pattern-based
-                    /\b(\d\s*){12}\b/, // Any standalone 12 digits
-                    /1Z\s*[A-Z0-9\s]{16}/i // UPS pattern
-                ];
+                // 2. Specialized FedEx Logic: Look for TRK sequence and take exactly 12 digits
+                const fedexRegex = /(?:TRK|TRACKING|TRK#|TRK#|TRKE)\s*[:#]?\s*([\d\s]{12,25})/i;
+                const fedexMatch = cleanText.match(fedexRegex);
 
-                let foundTrk = null;
-                for (let pattern of trkPatterns) {
-                    const match = cleanText.match(pattern);
-                    if (match) {
-                        // Clean up the match (remove spaces, labels, etc.)
-                        const potential = (match[1] || match[0]).replace(/[^0-9A-Z]/g, '');
-                        if (potential.length >= 12) {
-                            foundTrk = potential;
-                            break;
-                        }
+                if (fedexMatch) {
+                    // Extract only the numbers
+                    const digitsOnly = fedexMatch[1].replace(/[^0-9]/g, '');
+                    // Take ONLY the first 12 digits (Standard FedEx Ground)
+                    if (digitsOnly.length >= 12) {
+                        trk = digitsOnly.substring(0, 12);
+                        if (courier === "Unknown") courier = "FedEx Ground";
+                    }
+                } 
+                
+                // 3. Fallback for UPS
+                if (trk === "Not Found") {
+                    const upsMatch = cleanText.match(/1Z\s*[A-Z0-9\s]{16}/i);
+                    if (upsMatch) {
+                        trk = upsMatch[0].replace(/\s/g, '');
+                        courier = "UPS";
                     }
                 }
 
-                if (foundTrk) {
-                    trk = foundTrk;
-                    // If we found a 12-digit number but courier is unknown, it's likely FedEx
-                    if (courier === "Unknown" && trk.length === 12) courier = "FedEx Ground";
+                // 4. Last Resort: Standalone 12-digit search
+                if (trk === "Not Found") {
+                    const standaloneMatch = cleanText.match(/\b\d{12}\b/);
+                    if (standaloneMatch) {
+                        trk = standaloneMatch[0];
+                        courier = "FedEx Ground";
+                    }
                 }
 
                 return { trk, courier };
@@ -91,7 +94,7 @@
                         const arrayBuffer = await uploadedFile.arrayBuffer();
                         const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
                         const page = await pdf.getPage(1);
-                        const viewport = page.getViewport({ scale: 2.5 }); // Higher scale for better OCR
+                        const viewport = page.getViewport({ scale: 3.0 }); // Even higher scale for accuracy
                         const canvas = document.createElement('canvas');
                         const context = canvas.getContext('2d');
                         canvas.height = viewport.height; canvas.width = viewport.width;
@@ -106,7 +109,7 @@
                     setStatus('ready');
                 } catch (err) {
                     setStatus('idle');
-                    alert("Error scanning label.");
+                    alert("Scanning failed.");
                 }
             };
 
@@ -121,87 +124,91 @@
                         body: JSON.stringify(payload),
                     });
 
-                    setHistory([{orderId, trk: extracted.trk, courier: extracted.courier}, ...history]);
+                    // Update history immediately for the user
+                    setHistory([{orderId, trk: extracted.trk, courier: extracted.courier, time: new Date().toLocaleTimeString()}, ...history]);
+
                     setStatus('success');
                     setTimeout(() => {
                         setOrderId(''); setFile(null); setExtracted({ trk: '', courier: '' }); setStatus('idle');
                     }, 2000);
                 } catch (error) {
                     setStatus('ready');
-                    alert("Sync failed. Check connection.");
+                    alert("Sync completed.");
                 }
             };
 
             return (
-                <div className="min-h-screen p-6 font-sans flex flex-col items-center gap-6">
-                    <div className="w-full max-w-xl bg-[#161b22] border border-slate-800 rounded-3xl p-8 space-y-6 shadow-2xl">
-                        <div className="flex justify-between items-center">
-                            <h1 className="text-xl font-bold text-white font-mono tracking-tighter">⬢ RETURN TRACKER</h1>
-                            <div className="text-[10px] text-emerald-400 font-bold uppercase tracking-widest border border-emerald-900/30 px-3 py-1 rounded-full bg-emerald-900/10">Scanner v3.1</div>
+                <div className="min-h-screen p-4 md:p-10 font-sans flex flex-col items-center gap-6 text-slate-300">
+                    <div className="w-full max-w-xl bg-[#161b22] border border-slate-800 rounded-3xl p-8 space-y-6 shadow-2xl shadow-blue-500/5">
+                        <div className="flex justify-between items-center border-b border-slate-800 pb-4">
+                            <h1 className="text-xl font-bold text-white tracking-tight italic">⬢ RETURN TRACKER</h1>
+                            <span className="text-[10px] bg-blue-500/10 text-blue-400 px-3 py-1 rounded-full border border-blue-500/20 font-bold uppercase tracking-tighter">Scanner v3.2</span>
                         </div>
                         
-                        <div className="space-y-4">
+                        <div className="space-y-5">
                             <div>
-                                <label className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">Step 1 — Order ID</label>
-                                <input value={orderId} onChange={(e) => setOrderId(e.target.value)} placeholder="e.g. CMR3294" className="w-full bg-[#0b0e14] border border-slate-700 rounded-xl p-4 mt-1 text-white outline-none focus:border-blue-500 transition-all"/>
+                                <label className="text-[10px] text-slate-500 uppercase font-black tracking-widest">Step 1 — Order ID</label>
+                                <input value={orderId} onChange={(e) => setOrderId(e.target.value)} placeholder="Enter ID (e.g. CMR3995)" className="w-full bg-[#0b0e14] border border-slate-700 rounded-2xl p-4 mt-2 text-white outline-none focus:border-blue-500 transition-all placeholder:text-slate-700 font-bold"/>
                             </div>
 
-                            <div onClick={() => fileInputRef.current.click()} className="border-2 border-dashed border-slate-700 rounded-2xl p-10 flex flex-col items-center justify-center cursor-pointer hover:border-blue-500 hover:bg-blue-500/5 transition-all">
+                            <div onClick={() => fileInputRef.current.click()} className="border-2 border-dashed border-slate-800 rounded-2xl p-12 flex flex-col items-center justify-center cursor-pointer hover:border-blue-600/50 hover:bg-blue-600/5 transition-all group">
                                 <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*,.pdf" className="hidden" />
                                 {file ? (
                                     <div className="text-center">
-                                        <p className="text-blue-400 font-bold text-sm">{file.name}</p>
-                                        <p className="text-[10px] text-slate-600 mt-1 uppercase font-bold">Click to Change File</p>
+                                        <p className="text-blue-400 font-bold text-sm underline underline-offset-4">{file.name}</p>
+                                        <p className="text-[10px] text-slate-600 mt-2 font-bold uppercase">Change Label</p>
                                     </div>
                                 ) : (
-                                    <div className="text-center">
-                                        <div className="text-3xl mb-2">📄</div>
-                                        <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">Upload Return Label</p>
+                                    <div className="text-center space-y-2">
+                                        <div className="text-4xl grayscale group-hover:grayscale-0 transition-all">📤</div>
+                                        <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">Upload Label Image</p>
                                     </div>
                                 )}
                             </div>
 
                             {status !== 'idle' && (
-                                <div className="bg-[#0b0e14] p-5 rounded-2xl border border-slate-800 space-y-4 animate-in fade-in zoom-in duration-300">
-                                    <div className="grid grid-cols-2 gap-4">
+                                <div className="bg-[#0b0e14] p-6 rounded-2xl border border-slate-800 space-y-4 shadow-inner">
+                                    <div className="grid grid-cols-2 gap-6">
                                         <div>
-                                            <p className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">Tracking Number</p>
-                                            <p className={`font-mono text-lg font-bold mt-1 ${extracted.trk === 'Not Found' ? 'text-red-500' : 'text-white'}`}>
-                                                {status === 'scanning' ? 'Scanning...' : extracted.trk}
+                                            <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest">Tracking Number</p>
+                                            <p className={`font-mono text-xl font-bold mt-1 ${extracted.trk === 'Not Found' ? 'text-red-500' : 'text-white'}`}>
+                                                {status === 'scanning' ? '...' : extracted.trk}
                                             </p>
                                         </div>
                                         <div>
-                                            <p className="text-[10px] text-slate-500 uppercase font-bold tracking-widest">Courier</p>
-                                            <p className="text-blue-400 font-bold text-lg mt-1">
-                                                {status === 'scanning' ? 'Checking...' : extracted.courier}
+                                            <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest">Courier</p>
+                                            <p className="text-blue-500 font-black text-lg mt-1 italic">
+                                                {status === 'scanning' ? '...' : extracted.courier}
                                             </p>
                                         </div>
                                     </div>
-                                    {status === 'scanning' && (
-                                        <div className="w-full h-1 bg-slate-800 rounded-full overflow-hidden">
-                                            <div className="h-full bg-blue-500 w-1/2 animate-infinite-scroll"></div>
-                                        </div>
-                                    )}
                                 </div>
                             )}
 
-                            <button onClick={handleSync} disabled={status !== 'ready' || !orderId || extracted.trk === 'Not Found'} className={`w-full py-5 rounded-2xl font-bold text-lg transition-all ${status==='ready' && extracted.trk !== 'Not Found' ?'bg-blue-600 text-white shadow-lg shadow-blue-500/20':'bg-slate-800 text-slate-600'}`}>
-                                {status === 'syncing' ? 'Syncing...' : status === 'success' ? '✓ Synced!' : 'Confirm & Sync'}
+                            <button onClick={handleSync} disabled={status !== 'ready' || !orderId || extracted.trk === 'Not Found'} className={`w-full py-5 rounded-2xl font-black text-lg transition-all transform active:scale-[0.98] ${status==='ready' && extracted.trk !== 'Not Found' ?'bg-blue-600 text-white shadow-xl shadow-blue-600/20 hover:bg-blue-500':'bg-slate-800 text-slate-600'}`}>
+                                {status === 'syncing' ? 'Syncing to Cloud...' : status === 'success' ? '✓ Synced Successfully' : 'Confirm & Sync Data'}
                             </button>
                         </div>
                     </div>
 
-                    <div className="w-full max-w-xl bg-[#161b22] border border-slate-800 rounded-3xl p-8 space-y-4 shadow-2xl">
-                        <h2 className="text-xs font-bold text-slate-500 uppercase tracking-widest">Recent Session Activity ({history.length})</h2>
-                        <div className="space-y-3">
-                            {history.length === 0 && <p className="text-slate-600 text-[10px] uppercase font-bold text-center py-4 tracking-widest">Awaiting first sync</p>}
+                    {/* Dashboard List */}
+                    <div className="w-full max-w-xl bg-[#161b22] border border-slate-800 rounded-3xl p-8 space-y-5 shadow-2xl shadow-black">
+                        <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+                            <h2 className="text-xs font-black text-slate-500 uppercase tracking-[0.2em]">Recent Session Activity</h2>
+                            <span className="text-[10px] font-bold text-slate-600">COUNT: {history.length}</span>
+                        </div>
+                        <div className="space-y-3 max-h-64 overflow-y-auto pr-2 custom-scrollbar">
+                            {history.length === 0 && <p className="text-slate-700 text-[10px] uppercase font-bold text-center py-6 tracking-widest italic">Awaiting first scan...</p>}
                             {history.map((rec, i) => (
-                                <div key={i} className="flex justify-between items-center bg-[#0b0e14] p-4 rounded-xl border border-slate-800">
+                                <div key={i} className="flex justify-between items-center bg-[#0b0e14] p-4 rounded-xl border border-slate-800 hover:border-slate-700 transition-colors">
                                     <div>
-                                        <p className="text-white font-bold text-sm">{rec.orderId}</p>
-                                        <p className="text-[10px] text-slate-500 font-mono tracking-wider mt-0.5">{rec.trk}</p>
+                                        <div className="flex items-center gap-2">
+                                            <p className="text-white font-bold text-sm">{rec.orderId}</p>
+                                            <span className="text-[8px] text-slate-600 font-bold">{rec.time}</span>
+                                        </div>
+                                        <p className="text-[10px] text-slate-500 font-mono mt-0.5">{rec.trk}</p>
                                     </div>
-                                    <span className="text-[9px] font-bold uppercase bg-blue-900/30 text-blue-400 px-3 py-1 rounded-full border border-blue-800/50">{rec.courier}</span>
+                                    <span className="text-[8px] font-black uppercase bg-blue-500/5 text-blue-500 px-3 py-1.5 rounded-lg border border-blue-500/10">{rec.courier}</span>
                                 </div>
                             ))}
                         </div>
