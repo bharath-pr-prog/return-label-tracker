@@ -1,160 +1,101 @@
-"use client";
-import React, { useState } from 'react';
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Return Label Tracker</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #0b0e14; color: #cbd5e1; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
 
-// PASTE YOUR GOOGLE DEPLOYMENT URL HERE
-const GOOGLE_SCRIPT_URL = "YOUR_APPS_SCRIPT_URL_HERE";
+    <script type="text/babel">
+        const { useState } = React;
 
-export default function ReturnLabelTracker() {
-  const [orderId, setOrderId] = useState('');
-  const [trackingNumber, setTrackingNumber] = useState('');
-  const [courier, setCourier] = useState('FedEx Ground');
-  const [status, setStatus] = useState('idle'); // idle, syncing, success, error
+        // 1. PASTE YOUR GOOGLE DEPLOYMENT URL HERE
+        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxRds3GZj62tfEBCI312CSpIaRFFsllJswOo4W3FdAeO0-xsnVkyxbFGQ55MDS86x3cgw/exec";
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!orderId || !trackingNumber) return;
-    
-    setStatus('syncing');
+        function App() {
+            const [orderId, setOrderId] = useState('');
+            const [trackingNumber, setTrackingNumber] = useState('');
+            const [courier, setCourier] = useState('FedEx Ground');
+            const [status, setStatus] = useState('idle');
 
-    const payload = {
-      orderId: orderId.trim(),
-      trackingNumber: trackingNumber.trim(),
-      courier: courier,
-    };
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                setStatus('syncing');
 
-    try {
-      // mode: 'no-cors' is mandatory for Google Apps Script redirects
-      await fetch(GOOGLE_SCRIPT_URL, {
-        method: 'POST',
-        mode: 'no-cors',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+                const payload = { orderId, trackingNumber, courier };
 
-      // Reset form on success
-      setStatus('success');
-      setOrderId('');
-      setTrackingNumber('');
-      
-      // Reset success message after 3 seconds
-      setTimeout(() => setStatus('idle'), 3000);
-    } catch (error) {
-      console.error("Sync Error:", error);
-      setStatus('error');
-    }
-  };
+                try {
+                    await fetch(GOOGLE_SCRIPT_URL, {
+                        method: 'POST',
+                        mode: 'no-cors',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload),
+                    });
 
-  return (
-    <div className="min-h-screen bg-[#0b0e14] text-slate-300 p-4 md:p-10 font-sans">
-      <div className="max-w-2xl mx-auto space-y-6">
-        
-        {/* Header Area */}
-        <div className="flex justify-between items-center">
-          <div>
-            <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-              <span className="text-blue-500 text-3xl">⬢</span> Return Label Tracker
-            </h1>
-            <p className="text-slate-500 text-xs mt-1">Upload labels → Auto-syncs to Google Sheet & Drive</p>
-          </div>
-          <div className="bg-[#1a212d] border border-slate-800 px-4 py-2 rounded-full flex items-center gap-2">
-            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Google Connected</span>
-          </div>
-        </div>
+                    setStatus('success');
+                    setOrderId('');
+                    setTrackingNumber('');
+                    setTimeout(() => setStatus('idle'), 3000);
+                } catch (error) {
+                    setStatus('error');
+                }
+            };
 
-        {/* Connection Dashboard */}
-        <div className="grid grid-cols-2 gap-4">
-          <div className="bg-[#161b22] border border-slate-800 p-4 rounded-2xl flex items-center gap-4 shadow-sm">
-            <div className="bg-[#0b0e14] p-3 rounded-xl text-xl">📊</div>
-            <div>
-              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Google Sheet</p>
-              <p className="text-xs text-emerald-500 font-semibold">Active Sync ✓</p>
-            </div>
-          </div>
-          <div className="bg-[#161b22] border border-slate-800 p-4 rounded-2xl flex items-center gap-4 shadow-sm">
-            <div className="bg-[#0b0e14] p-3 rounded-xl text-xl">📁</div>
-            <div>
-              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Google Drive</p>
-              <p className="text-xs text-blue-400 font-semibold">Ready ✓</p>
-            </div>
-          </div>
-        </div>
+            return (
+                <div className="min-h-screen p-4 md:p-10 font-sans">
+                    <div className="max-w-2xl mx-auto space-y-6">
+                        <div className="flex justify-between items-center">
+                            <div>
+                                <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+                                    <span className="text-blue-500 text-3xl">⬢</span> Return Label Tracker
+                                </h1>
+                                <p className="text-slate-500 text-xs mt-1">Upload labels → Auto-syncs to Google Sheet</p>
+                            </div>
+                            <div className="bg-[#1a212d] border border-slate-800 px-4 py-2 rounded-full flex items-center gap-2 text-green-400 text-[10px] font-bold uppercase">
+                                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                                Google Connected
+                            </div>
+                        </div>
 
-        {/* Main Application Form */}
-        <form onSubmit={handleSubmit} className="bg-[#161b22] border border-slate-800 rounded-3xl p-8 space-y-8 shadow-2xl">
-          
-          {/* Step 1: Order ID */}
-          <div className="space-y-3">
-            <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Step 1 — Enter Order ID</label>
-            <input 
-              required
-              value={orderId}
-              onChange={(e) => setOrderId(e.target.value)}
-              placeholder="e.g. SH1210, CMR6508, Z1249642..."
-              className="w-full bg-[#0b0e14] border border-slate-700 rounded-xl p-4 text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all placeholder:text-slate-700"
-            />
-          </div>
+                        <form onSubmit={handleSubmit} className="bg-[#161b22] border border-slate-800 rounded-3xl p-8 space-y-8 shadow-2xl">
+                            <div className="space-y-3">
+                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Step 1 — Order ID</label>
+                                <input required value={orderId} onChange={(e) => setOrderId(e.target.value)} placeholder="e.g. SH1210..." className="w-full bg-[#0b0e14] border border-slate-700 rounded-xl p-4 text-white outline-none focus:border-blue-500"/>
+                            </div>
 
-          {/* Step 2: Tracking Details */}
-          <div className="space-y-3">
-            <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Step 2 — Tracking Number</label>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <input 
-                required
-                value={trackingNumber}
-                onChange={(e) => setTrackingNumber(e.target.value)}
-                placeholder="e.g. 7977 0107 7682"
-                className="md:col-span-2 w-full bg-[#0b0e14] border border-slate-700 rounded-xl p-4 text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all placeholder:text-slate-700"
-              />
-              <select 
-                value={courier}
-                onChange={(e) => setCourier(e.target.value)}
-                className="w-full bg-[#0b0e14] border border-slate-700 rounded-xl p-4 text-white focus:ring-2 focus:ring-blue-500 outline-none appearance-none cursor-pointer font-medium"
-              >
-                <option>FedEx Ground</option>
-                <option>UPS</option>
-                <option>Amazon</option>
-                <option>USPS</option>
-                <option>DHL</option>
-              </select>
-            </div>
-          </div>
+                            <div className="space-y-3">
+                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Step 2 — Tracking</label>
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <input required value={trackingNumber} onChange={(e) => setTrackingNumber(e.target.value)} placeholder="Tracking #" className="md:col-span-2 w-full bg-[#0b0e14] border border-slate-700 rounded-xl p-4 text-white outline-none focus:border-blue-500"/>
+                                    <select value={courier} onChange={(e) => setCourier(e.target.value)} className="w-full bg-[#0b0e14] border border-slate-700 rounded-xl p-4 text-white outline-none">
+                                        <option>FedEx Ground</option>
+                                        <option>UPS</option>
+                                        <option>Amazon</option>
+                                        <option>USPS</option>
+                                    </select>
+                                </div>
+                            </div>
 
-          {/* Submit Button */}
-          <div className="pt-4">
-            <button 
-              type="submit"
-              disabled={status === 'syncing'}
-              className={`w-full py-5 rounded-2xl font-bold text-lg transition-all transform active:scale-95 flex items-center justify-center gap-3 ${
-                status === 'syncing' 
-                ? 'bg-slate-700 text-slate-400 cursor-not-allowed' 
-                : 'bg-blue-600 hover:bg-blue-500 text-white shadow-[0_0_20px_rgba(37,99,235,0.3)]'
-              }`}
-            >
-              {status === 'syncing' ? (
-                <>
-                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-                  Syncing to Sheet...
-                </>
-              ) : status === 'success' ? (
-                "✓ Data Sent Successfully"
-              ) : (
-                "Sync Return Data"
-              )}
-            </button>
-            
-            {status === 'error' && (
-              <p className="text-center text-red-400 text-sm mt-4 font-medium italic">
-                Connection failed. Please check your Script URL.
-              </p>
-            )}
-          </div>
-        </form>
+                            <button type="submit" disabled={status === 'syncing'} className={`w-full py-5 rounded-2xl font-bold text-lg transition-all ${status === 'syncing' ? 'bg-slate-700' : 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/20'}`}>
+                                {status === 'syncing' ? 'Syncing...' : status === 'success' ? '✓ Synced!' : 'Sync Return Data'}
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            );
+        }
 
-        <p className="text-center text-slate-700 text-[10px] font-bold uppercase tracking-widest">
-          Shopify Returns Management System • v1.2
-        </p>
-      </div>
-    </div>
-  );
-}
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
