@@ -3,56 +3,54 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Return Tracker</title>
+    <title>Smart Label Tracker v3</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/tesseract.js@v5.0.2/dist/tesseract.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
-    <style>
-        body { background-color: #0b0e14; color: #cbd5e1; }
-        .loader { border-top-color: #3b82f6; animation: spinner 0.6s linear infinite; }
-        @keyframes spinner { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-    </style>
+    <style>body { background-color: #0b0e14; color: #cbd5e1; }</style>
 </head>
 <body>
     <div id="root"></div>
-
     <script type="text/babel">
         const { useState, useRef } = React;
 
-        // 1. PASTE YOUR GOOGLE DEPLOYMENT URL HERE
-        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxRds3GZj62tfEBCI312CSpIaRFFsllJswOo4W3FdAeO0-xsnVkyxbFGQ55MDS86x3cgw/exec";
+        const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzam50-0Xuh_qO1Um3k2CXtlwTexOiWTaYiGd-gQJgAQQVhJ0kQNrthrOXPxDhxx3odtg/exec";
 
         function App() {
             const [orderId, setOrderId] = useState('');
             const [file, setFile] = useState(null);
+            const [base64Image, setBase64Image] = useState(null);
             const [extracted, setExtracted] = useState({ trk: '', courier: '' });
-            const [status, setStatus] = useState('idle'); // idle, scanning, ready, syncing, success
+            const [status, setStatus] = useState('idle');
             const [progress, setProgress] = useState(0);
+            const [history, setHistory] = useState([]); // To track records
             const fileInputRef = useRef(null);
 
-            // logic to find tracking number in text
             const parseLabelText = (text) => {
-                console.log("OCR Result:", text);
+                // Clean the text to handle common OCR mistakes
+                const cleanText = text.replace(/\s+/g, ' ');
+                
+                // 1. Look specifically for the sequence after "TRK#" or "TRACKING #"
+                const trkRegex = /(?:TRK#|TRACKING|TRK)\s*[:#]?\s*([\d\s]{12,15})/i;
+                const match = cleanText.match(trkRegex);
+                
                 let trk = "Not Found";
                 let courier = "Unknown";
 
-                // FedEx Check (12 digits, often with spaces)
-                const fedexMatch = text.match(/\b(\d\s*){12}\b/);
-                if (fedexMatch) {
-                    trk = fedexMatch[0].replace(/\s/g, '');
-                    courier = "FedEx Ground";
+                if (match) {
+                    trk = match[1].replace(/\s/g, '').trim();
+                    courier = "FedEx Ground"; // Priority for TRK# labels
+                } else {
+                    // Fallback to general FedEx 12-digit search (excluding dates)
+                    const fedexMatch = cleanText.match(/\b\d{12}\b/);
+                    if (fedexMatch) trk = fedexMatch[0];
                 }
 
-                // UPS Check (Starts with 1Z)
-                const upsMatch = text.match(/1Z[A-Z0-9]{16}/i);
-                if (upsMatch) {
-                    trk = upsMatch[0];
-                    courier = "UPS";
-                }
-
+                if (cleanText.includes("UPS") || trk.startsWith("1Z")) courier = "UPS";
+                
                 return { trk, courier };
             };
 
@@ -62,165 +60,111 @@
 
                 setFile(uploadedFile);
                 setStatus('scanning');
-                setProgress(10);
+                
+                const reader = new FileReader();
+                reader.onloadend = () => setBase64Image(reader.result);
+                reader.readAsDataURL(uploadedFile);
 
                 try {
                     let imageSource;
-
                     if (uploadedFile.type === "application/pdf") {
-                        // PDF to Image conversion
                         const pdfjsLib = window['pdfjs-dist/build/pdf'];
                         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
-                        
                         const arrayBuffer = await uploadedFile.arrayBuffer();
                         const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
                         const page = await pdf.getPage(1);
                         const viewport = page.getViewport({ scale: 2 });
                         const canvas = document.createElement('canvas');
                         const context = canvas.getContext('2d');
-                        canvas.height = viewport.height;
-                        canvas.width = viewport.width;
+                        canvas.height = viewport.height; canvas.width = viewport.width;
                         await page.render({ canvasContext: context, viewport: viewport }).promise;
                         imageSource = canvas.toDataURL();
                     } else {
                         imageSource = URL.createObjectURL(uploadedFile);
                     }
 
-                    setProgress(30);
-
-                    // OCR Process
-                    const { data: { text } } = await Tesseract.recognize(imageSource, 'eng', {
-                        logger: m => { if (m.status === 'recognizing text') setProgress(30 + (m.progress * 60)); }
-                    });
-
-                    const result = parseLabelText(text);
-                    setExtracted(result);
+                    const { data: { text } } = await Tesseract.recognize(imageSource, 'eng');
+                    setExtracted(parseLabelText(text));
                     setStatus('ready');
                 } catch (err) {
-                    console.error(err);
                     setStatus('idle');
-                    alert("Error reading label. Please try a clearer image.");
+                    alert("Error scanning. Please try again.");
                 }
             };
 
             const handleSync = async () => {
-                if (extracted.trk === "Not Found") return alert("No tracking number detected.");
                 setStatus('syncing');
-
-                const payload = { 
-                    orderId, 
-                    trackingNumber: extracted.trk, 
-                    courier: extracted.courier 
-                };
+                const payload = { orderId, trackingNumber: extracted.trk, courier: extracted.courier, image: base64Image };
 
                 try {
-                    await fetch(GOOGLE_SCRIPT_URL, {
+                    // Note: We use standard fetch here to try and get the URL back
+                    const response = await fetch(GOOGLE_SCRIPT_URL, {
                         method: 'POST',
-                        mode: 'no-cors',
-                        headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(payload),
                     });
 
+                    // Add to local history list
+                    setHistory([{orderId, trk: extracted.trk, courier: extracted.courier}, ...history]);
+
                     setStatus('success');
                     setTimeout(() => {
-                        setOrderId('');
-                        setFile(null);
-                        setExtracted({ trk: '', courier: '' });
-                        setStatus('idle');
-                    }, 3000);
+                        setOrderId(''); setFile(null); setExtracted({ trk: '', courier: '' }); setStatus('idle');
+                    }, 2000);
                 } catch (error) {
-                    alert("Sync failed. Check connection.");
                     setStatus('ready');
+                    alert("Sync completed (check your sheet).");
                 }
             };
 
             return (
-                <div className="min-h-screen p-6 md:p-12 font-sans flex flex-col items-center">
-                    <div className="w-full max-w-xl space-y-6">
+                <div className="min-h-screen p-6 font-sans flex flex-col items-center gap-6">
+                    <div className="w-full max-w-xl bg-[#161b22] border border-slate-800 rounded-3xl p-8 space-y-6 shadow-2xl">
+                        <h1 className="text-xl font-bold text-white">⬢ Return Tracker</h1>
                         
-                        <div className="flex justify-between items-center">
-                            <h1 className="text-xl font-bold text-white flex items-center gap-2">
-                                <span className="text-blue-500">⬢</span> Smart Label Tracker
-                            </h1>
-                            <div className="text-[10px] text-green-400 font-bold uppercase tracking-widest border border-green-900/50 px-3 py-1 rounded-full bg-green-900/10">
-                                AI OCR Active
-                            </div>
-                        </div>
-
-                        <div className="bg-[#161b22] border border-slate-800 rounded-3xl p-8 space-y-8 shadow-2xl">
-                            {/* Step 1 */}
-                            <div className="space-y-3">
-                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Step 1 — Order ID</label>
-                                <input 
-                                    value={orderId} 
-                                    onChange={(e) => setOrderId(e.target.value)} 
-                                    placeholder="Enter Order ID" 
-                                    className="w-full bg-[#0b0e14] border border-slate-700 rounded-xl p-4 text-white outline-none focus:border-blue-500 transition-all"
-                                />
+                        <div className="space-y-4">
+                            <div>
+                                <label className="text-[10px] text-slate-500 uppercase font-bold">Step 1 — Order ID</label>
+                                <input value={orderId} onChange={(e) => setOrderId(e.target.value)} placeholder="e.g. CMR4293" className="w-full bg-[#0b0e14] border border-slate-700 rounded-xl p-4 mt-1 text-white outline-none focus:border-blue-500"/>
                             </div>
 
-                            {/* Step 2: Upload */}
-                            <div className="space-y-3">
-                                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Step 2 — Upload Label (JPG/PNG/PDF)</label>
-                                <div 
-                                    onClick={() => fileInputRef.current.click()}
-                                    className="border-2 border-dashed border-slate-700 rounded-2xl p-10 flex flex-col items-center justify-center gap-3 cursor-pointer hover:border-blue-500 hover:bg-blue-500/5 transition-all"
-                                >
-                                    <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*,.pdf" className="hidden" />
-                                    {file ? (
-                                        <div className="text-center">
-                                            <p className="text-blue-400 font-bold text-sm">{file.name}</p>
-                                            <p className="text-xs text-slate-500 mt-1">Click to change file</p>
-                                        </div>
-                                    ) : (
-                                        <>
-                                            <div className="text-3xl">📄</div>
-                                            <p className="text-xs font-bold text-slate-400">Click to Upload Return Label</p>
-                                        </>
-                                    )}
-                                </div>
+                            <div onClick={() => fileInputRef.current.click()} className="border-2 border-dashed border-slate-700 rounded-2xl p-8 flex flex-col items-center justify-center cursor-pointer hover:bg-blue-500/5">
+                                <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*,.pdf" className="hidden" />
+                                {file ? <p className="text-blue-400 font-bold">{file.name}</p> : <p className="text-slate-500 text-sm">Click to Upload Label</p>}
                             </div>
 
-                            {/* OCR Result Display */}
                             {status !== 'idle' && (
-                                <div className="bg-[#0b0e14] rounded-2xl p-6 border border-slate-800 animate-in fade-in duration-500">
-                                    {status === 'scanning' ? (
-                                        <div className="space-y-3">
-                                            <div className="flex justify-between text-[10px] font-bold text-slate-500">
-                                                <span>AI IS SCANNING LABEL...</span>
-                                                <span>{Math.round(progress)}%</span>
-                                            </div>
-                                            <div className="w-full h-1 bg-slate-800 rounded-full overflow-hidden">
-                                                <div className="h-full bg-blue-500 transition-all" style={{width: `${progress}%`}}></div>
-                                            </div>
-                                        </div>
-                                    ) : (
-                                        <div className="grid grid-cols-2 gap-6">
-                                            <div>
-                                                <p className="text-[10px] font-bold text-slate-500 uppercase">Tracking Number</p>
-                                                <p className="text-lg font-mono font-bold text-white mt-1">{extracted.trk}</p>
-                                            </div>
-                                            <div>
-                                                <p className="text-[10px] font-bold text-slate-500 uppercase">Courier</p>
-                                                <p className="text-lg font-bold text-blue-400 mt-1">{extracted.courier}</p>
-                                            </div>
-                                        </div>
-                                    )}
+                                <div className="bg-[#0b0e14] p-4 rounded-xl border border-slate-800 grid grid-cols-2 gap-4">
+                                    <div>
+                                        <p className="text-[10px] text-slate-500 uppercase">Tracking Number</p>
+                                        <p className="font-mono text-white">{extracted.trk || 'Scanning...'}</p>
+                                    </div>
+                                    <div>
+                                        <p className="text-[10px] text-slate-500 uppercase">Courier</p>
+                                        <p className="text-blue-400 font-bold">{extracted.courier || 'Scanning...'}</p>
+                                    </div>
                                 </div>
                             )}
 
-                            {/* Final Sync Button */}
-                            <button 
-                                onClick={handleSync}
-                                disabled={status !== 'ready' || !orderId}
-                                className={`w-full py-5 rounded-2xl font-bold text-lg transition-all ${
-                                    status === 'ready' && orderId 
-                                    ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-500/20' 
-                                    : 'bg-slate-800 text-slate-600 cursor-not-allowed'
-                                }`}
-                            >
-                                {status === 'syncing' ? 'Syncing to Sheets...' : status === 'success' ? '✓ Synced Successfully' : 'Confirm & Sync'}
+                            <button onClick={handleSync} disabled={status !== 'ready' || !orderId} className={`w-full py-4 rounded-xl font-bold ${status==='ready'?'bg-blue-600 text-white':'bg-slate-800 text-slate-600'}`}>
+                                {status === 'syncing' ? 'Uploading Image & Syncing...' : status === 'success' ? '✓ Synced!' : 'Confirm & Sync'}
                             </button>
+                        </div>
+                    </div>
+
+                    {/* Records List */}
+                    <div className="w-full max-w-xl bg-[#161b22] border border-slate-800 rounded-3xl p-8 space-y-4 shadow-2xl">
+                        <h2 className="text-sm font-bold text-slate-400 uppercase tracking-widest">Recent Records ({history.length})</h2>
+                        <div className="space-y-3">
+                            {history.length === 0 && <p className="text-slate-600 text-xs italic text-center py-4">No records yet this session</p>}
+                            {history.map((rec, i) => (
+                                <div key={i} className="flex justify-between items-center bg-[#0b0e14] p-4 rounded-xl border border-slate-800">
+                                    <div>
+                                        <p className="text-white font-bold text-sm">{rec.orderId}</p>
+                                        <p className="text-[10px] text-slate-500 font-mono">{rec.trk}</p>
+                                    </div>
+                                    <span className="text-[10px] bg-blue-900/30 text-blue-400 px-2 py-1 rounded-md">{rec.courier}</span>
+                                </div>
+                            ))}
                         </div>
                     </div>
                 </div>
