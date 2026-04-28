@@ -3,20 +3,26 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Smart Label Tracker v3.3</title>
+    <title>Return Tracker Pro</title>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/tesseract.js@v5.0.2/dist/tesseract.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
-    <style>body { background-color: #0b0e14; color: #cbd5e1; }</style>
+    <style>
+        body { background-color: #0b0e14; color: #cbd5e1; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .custom-scrollbar::-webkit-scrollbar { width: 5px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #0b0e14; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 10px; }
+    </style>
 </head>
 <body>
     <div id="root"></div>
     <script type="text/babel">
-        const { useState, useRef } = React;
+        const { useState, useEffect, useRef } = React;
 
+        // UPDATED URL
         const GOOGLE_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxy_mFX8r1jaW3xr2N0UUaGTU4k8wd2MuAVaOrmBwC_X_SECyOj3OmH1mVWIVv2wW54VA/exec";
 
         function App() {
@@ -25,120 +31,118 @@
             const [base64Image, setBase64Image] = useState(null);
             const [extracted, setExtracted] = useState({ trk: '', courier: '' });
             const [status, setStatus] = useState('idle');
-            const [history, setHistory] = useState([]);
+            const [dbRecords, setDbRecords] = useState([]);
             const fileInputRef = useRef(null);
+
+            // Fetch history from Google Sheet
+            const loadDatabase = async () => {
+                try {
+                    const response = await fetch(GOOGLE_SCRIPT_URL);
+                    const data = await response.json();
+                    if (Array.isArray(data)) setDbRecords(data);
+                } catch (e) { console.log("Connecting to Database..."); }
+            };
+
+            useEffect(() => { loadDatabase(); }, []);
 
             const parseLabelText = (text) => {
                 const cleanText = text.toUpperCase().replace(/\n/g, ' ');
-                let trk = "Not Found";
-                let courier = "Unknown";
-
+                let trk = "Not Found", courier = "Unknown";
                 if (cleanText.includes("FEDEX")) courier = "FedEx Ground";
                 if (cleanText.includes("UPS") || cleanText.includes("1Z")) courier = "UPS";
-
-                const fedexRegex = /(?:TRK|TRACKING|TRK#|TRK#|TRKE)\s*[:#]?\s*([\d\s]{12,25})/i;
-                const fedexMatch = cleanText.match(fedexRegex);
-
-                if (fedexMatch) {
-                    const digitsOnly = fedexMatch[1].replace(/[^0-9]/g, '');
-                    if (digitsOnly.length >= 12) {
-                        trk = digitsOnly.substring(0, 12);
-                        if (courier === "Unknown") courier = "FedEx Ground";
-                    }
-                } 
-                
-                if (trk === "Not Found") {
-                    const standaloneMatch = cleanText.match(/\b\d{12}\b/);
-                    if (standaloneMatch) {
-                        trk = standaloneMatch[0];
-                        courier = "FedEx Ground";
-                    }
+                const fedexRegex = /(?:TRK|TRACKING|TRK#|TRKE)\s*[:#]?\s*([\d\s]{12,25})/i;
+                const match = cleanText.match(fedexRegex);
+                if (match) {
+                    const digits = match[1].replace(/[^0-9]/g, '');
+                    if (digits.length >= 12) trk = digits.substring(0, 12);
                 }
-
-                return { trk, courier };
+                return { trk, courier: (trk !== "Not Found" && courier === "Unknown") ? "FedEx Ground" : courier };
             };
 
             const handleFileUpload = async (e) => {
-                const uploadedFile = e.target.files[0];
-                if (!uploadedFile) return;
-                setFile(uploadedFile);
-                setStatus('scanning');
+                const upFile = e.target.files[0];
+                if (!upFile) return;
+                setFile(upFile); setStatus('scanning');
                 const reader = new FileReader();
                 reader.onloadend = () => setBase64Image(reader.result);
-                reader.readAsDataURL(uploadedFile);
-
+                reader.readAsDataURL(upFile);
                 try {
-                    let imageSource;
-                    if (uploadedFile.type === "application/pdf") {
-                        const pdfjsLib = window['pdfjs-dist/build/pdf'];
-                        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
-                        const arrayBuffer = await uploadedFile.arrayBuffer();
-                        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-                        const page = await pdf.getPage(1);
-                        const viewport = page.getViewport({ scale: 3.0 });
-                        const canvas = document.createElement('canvas');
-                        const context = canvas.getContext('2d');
-                        canvas.height = viewport.height; canvas.width = viewport.width;
-                        await page.render({ canvasContext: context, viewport: viewport }).promise;
-                        imageSource = canvas.toDataURL();
-                    } else {
-                        imageSource = URL.createObjectURL(uploadedFile);
-                    }
-                    const { data: { text } } = await Tesseract.recognize(imageSource, 'eng');
-                    setExtracted(parseLabelText(text));
-                    setStatus('ready');
-                } catch (err) {
-                    setStatus('idle');
-                }
+                    const { data: { text } } = await Tesseract.recognize(URL.createObjectURL(upFile), 'eng');
+                    setExtracted(parseLabelText(text)); setStatus('ready');
+                } catch (err) { setStatus('idle'); }
             };
 
             const handleSync = async () => {
                 setStatus('syncing');
-                const payload = { 
-                    orderId: orderId, 
-                    trackingNumber: extracted.trk, 
-                    courier: extracted.courier, 
-                    image: base64Image 
-                };
-
+                const payload = { orderId, trackingNumber: extracted.trk, courier: extracted.courier, image: base64Image };
                 try {
-                    await fetch(GOOGLE_SCRIPT_URL, {
-                        method: 'POST',
-                        mode: 'no-cors',
-                        body: JSON.stringify(payload),
-                    });
-                    setHistory([{orderId, trk: extracted.trk, courier: extracted.courier}, ...history]);
+                    await fetch(GOOGLE_SCRIPT_URL, { method: 'POST', mode: 'no-cors', body: JSON.stringify(payload) });
                     setStatus('success');
-                    setTimeout(() => {
+                    setTimeout(() => { 
                         setOrderId(''); setFile(null); setExtracted({ trk: '', courier: '' }); setStatus('idle');
-                    }, 2000);
-                } catch (error) {
-                    setStatus('ready');
-                }
+                        loadDatabase(); // Instant UI refresh
+                    }, 1500);
+                } catch (error) { setStatus('ready'); }
             };
 
             return (
-                <div className="min-h-screen p-6 font-sans flex flex-col items-center gap-6">
-                    <div className="w-full max-w-xl bg-[#161b22] border border-slate-800 rounded-3xl p-8 space-y-6 shadow-2xl">
-                        <h1 className="text-xl font-bold text-white tracking-tighter italic">⬢ RETURN TRACKER</h1>
-                        <div className="space-y-4">
-                            <div>
-                                <label className="text-[10px] text-slate-500 uppercase font-black tracking-widest">Order ID</label>
-                                <input value={orderId} onChange={(e) => setOrderId(e.target.value)} placeholder="CMRXXXX" className="w-full bg-[#0b0e14] border border-slate-700 rounded-xl p-4 mt-1 text-white outline-none focus:border-blue-500"/>
+                <div className="min-h-screen p-6 md:p-12 flex flex-col items-center gap-10">
+                    
+                    {/* TOP SCANNER CARD */}
+                    <div className="w-full max-w-xl bg-[#161b22] border border-slate-800 rounded-[2rem] p-8 shadow-2xl">
+                        <div className="flex justify-between items-center mb-8 border-b border-slate-800 pb-4">
+                            <h1 className="text-xl font-black text-white tracking-widest italic">LABEL SCANNER</h1>
+                            <button onClick={loadDatabase} className="text-[9px] font-bold text-blue-500 border border-blue-500/20 px-3 py-1 rounded-full hover:bg-blue-500/10 uppercase">Refresh History</button>
+                        </div>
+
+                        <div className="space-y-6">
+                            <input value={orderId} onChange={(e) => setOrderId(e.target.value)} placeholder="ENTER ORDER ID" className="w-full bg-[#0b0e14] border border-slate-700 rounded-2xl p-5 text-white outline-none focus:border-blue-500 font-bold placeholder:text-slate-700"/>
+
+                            <div onClick={() => fileInputRef.current.click()} className="border-2 border-dashed border-slate-800 rounded-2xl p-12 flex flex-col items-center justify-center cursor-pointer hover:border-blue-600 transition-all bg-[#0b0e14]/50">
+                                <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
+                                {file ? <p className="text-blue-400 font-black">{file.name}</p> : <p className="text-slate-500 text-xs font-black uppercase tracking-widest">Select Document</p>}
                             </div>
-                            <div onClick={() => fileInputRef.current.click()} className="border-2 border-dashed border-slate-800 rounded-2xl p-10 flex flex-col items-center justify-center cursor-pointer hover:border-blue-600 transition-all">
-                                <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*,.pdf" className="hidden" />
-                                {file ? <p className="text-blue-400 font-bold text-sm">{file.name}</p> : <p className="text-slate-500 text-xs font-bold uppercase tracking-widest">Upload Label</p>}
-                            </div>
+
                             {status !== 'idle' && (
-                                <div className="bg-[#0b0e14] p-4 rounded-xl border border-slate-800 grid grid-cols-2 gap-4">
-                                    <div><p className="text-[10px] text-slate-500 uppercase font-bold">Tracking</p><p className="font-mono text-white text-lg">{extracted.trk || '...'}</p></div>
-                                    <div><p className="text-[10px] text-slate-500 uppercase font-bold">Courier</p><p className="text-blue-500 font-bold text-lg">{extracted.courier || '...'}</p></div>
+                                <div className="bg-[#0b0e14] p-5 rounded-2xl border border-slate-800 grid grid-cols-2 gap-4 animate-pulse">
+                                    <div><p className="text-[10px] text-slate-500 font-bold uppercase">Tracking</p><p className="font-mono text-white font-bold">{extracted.trk || '...'}</p></div>
+                                    <div className="text-right"><p className="text-[10px] text-slate-500 font-bold uppercase">Courier</p><p className="text-blue-500 font-black italic">{extracted.courier || '...'}</p></div>
                                 </div>
                             )}
-                            <button onClick={handleSync} disabled={status !== 'ready' || !orderId} className={`w-full py-4 rounded-xl font-black text-lg transition-all ${status==='ready'?'bg-blue-600 text-white shadow-lg shadow-blue-500/20':'bg-slate-800 text-slate-600'}`}>
-                                {status === 'syncing' ? 'Syncing...' : status === 'success' ? '✓ Synced' : 'Confirm & Sync'}
+
+                            <button onClick={handleSync} disabled={status !== 'ready' || !orderId} className={`w-full py-5 rounded-2xl font-black text-lg tracking-widest transition-all ${status==='ready'?'bg-blue-600 text-white shadow-xl shadow-blue-600/20':'bg-slate-800 text-slate-600'}`}>
+                                {status === 'syncing' ? 'UPDATING...' : status === 'success' ? '✓ SYNC COMPLETE' : 'CONFIRM & SYNC'}
                             </button>
+                        </div>
+                    </div>
+
+                    {/* RECORDS DATABASE CARD */}
+                    <div className="w-full max-w-2xl bg-[#161b22] border border-slate-800 rounded-[2.5rem] p-8 shadow-2xl">
+                        <div className="flex justify-between items-center mb-6 border-b border-slate-800 pb-4">
+                            <h2 className="text-sm font-black text-slate-400 uppercase tracking-[0.3em]">RECORDS DATABASE</h2>
+                            <span className="text-[10px] font-black bg-slate-800 px-3 py-1 rounded-full text-slate-500">{dbRecords.length} TOTAL RECORDS</span>
+                        </div>
+
+                        <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
+                            {dbRecords.length === 0 ? (
+                                <div className="text-center py-20">
+                                    <p className="text-slate-800 font-black tracking-[0.2em] italic">DATABASE EMPTY</p>
+                                    <p className="text-[10px] text-slate-700 mt-2">Awaiting first scan of this session</p>
+                                </div>
+                            ) : (
+                                dbRecords.map((rec, i) => (
+                                    <div key={i} className="flex justify-between items-center bg-[#0b0e14] p-5 rounded-2xl border border-slate-800 hover:border-slate-700 transition-all">
+                                        <div className="flex-1">
+                                            <p className="text-white font-black text-sm">{rec.orderId}</p>
+                                            <p className="text-[10px] text-slate-500 font-mono mt-1 font-bold">{rec.trackingNumber}</p>
+                                        </div>
+                                        <div className="flex items-center gap-6">
+                                            <span className="text-[9px] font-black uppercase text-blue-500/80 bg-blue-500/5 px-3 py-1.5 rounded-lg border border-blue-500/10">{rec.courier}</span>
+                                            {rec.link && <a href={rec.link} target="_blank" className="text-xl hover:scale-125 transition-transform">🖼️</a>}
+                                        </div>
+                                    </div>
+                                ))
+                            )}
                         </div>
                     </div>
                 </div>
