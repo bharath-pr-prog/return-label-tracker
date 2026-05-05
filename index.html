@@ -45,6 +45,17 @@
 
             useEffect(() => { loadDatabase(); }, []);
 
+            // Helper function to turn Google Drive links into Direct Download links safely
+            const getDirectDownload = (url) => {
+                if (!url || !url.includes('/d/')) return url;
+                try {
+                    const fileId = url.split('/d/')[1].split('/')[0];
+                    return `https://drive.google.com/uc?export=download&id=${fileId}`;
+                } catch (e) {
+                    return url; // If parsing fails, fall back to normal link to prevent crashes
+                }
+            };
+
             const parseLabelText = (text) => {
                 const cleanText = text.toUpperCase().replace(/\n/g, ' ');
                 let trk = "Not Found", courier = "Unknown";
@@ -138,7 +149,20 @@
                                         </div>
                                         <div className="flex items-center gap-6">
                                             <span className="text-[9px] font-black uppercase text-blue-500/80 bg-blue-500/5 px-3 py-1.5 rounded-lg border border-blue-500/10">{rec.courier}</span>
-                                            {rec.link && <a href={rec.link} target="_blank" className="text-xl hover:scale-125 transition-transform">🖼️</a>}
+                                            
+                                            {/* NEW DIRECT DOWNLOAD BUTTON */}
+                                            {rec.link && (
+                                                <a 
+                                                    href={getDirectDownload(rec.link)} 
+                                                    className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg text-[10px] font-black tracking-wider uppercase transition-all shadow-md flex items-center gap-1.5"
+                                                >
+                                                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" fill="currentColor" viewBox="0 0 16 16">
+                                                        <path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/>
+                                                        <path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/>
+                                                    </svg>
+                                                    Download
+                                                </a>
+                                            )}
                                         </div>
                                     </div>
                                 ))
